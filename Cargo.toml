@@ -1,0 +1,17 @@
+[package]
+name = "festivus"
+version = "0.1.0"
+edition = "2021"
+authors = ["benny blader <ben@blockspaces.com"]
+description = "Calculate a projected fee for a channel open with LND UTXOs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitcoin = { version = "0.31.0", features = ["serde", "rand"] }
+rand = "0.8.5"
+reqwest = { version = "0.11.22", features = ["blocking", "json"] }
+serde = { version = "1.0.193", features = ["derive"] }
+serde_json = "1.0.108"
+tonic_lnd = { git = "https://github.com/Synota-io/tonic_lnd.git" }
+# rust-bitcoin-coin-selection = { version = "0.1.0", git = "https://github.com/p2pderivatives/rust-bitcoin-coin-selection", rev = "405451929568422f7df809e35d6ad8f36fccce90", features = ["rand"] }
