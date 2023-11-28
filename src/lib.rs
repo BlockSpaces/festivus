@@ -9,20 +9,14 @@ use bitcoin::{
 use serde::{Deserialize, Serialize};
 use std::vec;
 use tonic_lnd::lnrpc::Utxo;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum FestivusError {
+    #[error("Not enough Bitcoin in the wallet.")]
     NotEnoughBitcoin,
+    #[error("Error getting recommended fees.")]
     ReqwestError,
-}
-
-impl std::fmt::Display for FestivusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            FestivusError::NotEnoughBitcoin => write!(f, "Not enough bitcoin in wallet."),
-            FestivusError::ReqwestError => write!(f, "Could not receive fee rates."),
-        }
-    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -37,11 +31,11 @@ struct RecommendedFess {
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct ProjectedFees {
-    fastest_fee: (u64, u64),
-    half_hour_fee: (u64, u64),
-    hour_fee: (u64, u64),
-    economy_fee: (u64, u64),
-    minimum_fee: (u64, u64),
+    pub fastest_fee: (u64, u64),
+    pub half_hour_fee: (u64, u64),
+    pub hour_fee: (u64, u64),
+    pub economy_fee: (u64, u64),
+    pub minimum_fee: (u64, u64),
 }
 
 pub fn calculate_fee(mut utxos: Vec<Utxo>, amount: u64) -> Result<ProjectedFees, FestivusError> {
