@@ -4,7 +4,7 @@ use bitcoin::{
     secp256k1::{Keypair, Secp256k1},
     transaction::{self, InputWeightPrediction},
     Amount, ScriptBuf, Transaction, TxOut, WScriptHash,
-    XOnlyPublicKey,
+    XOnlyPublicKey, Txid
 };
 use serde::{Deserialize, Serialize};
 use std::vec;
@@ -38,7 +38,7 @@ pub struct ProjectedFees {
     pub minimum_fee: (u64, u64),
 }
 
-pub fn calculate_fee(utxos: Vec<Utxo>, amount: u64) -> Result<ProjectedFees, FestivusError> {
+pub fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<ProjectedFees, FestivusError> {
     // Create a random taproot keypair for the ouput.
     let secp = Secp256k1::new();
     let mut rand = rand::thread_rng();
@@ -66,6 +66,20 @@ pub fn calculate_fee(utxos: Vec<Utxo>, amount: u64) -> Result<ProjectedFees, Fes
         output: vec![funding_output, change_output],
     };
 
+    let utxos = match utxos {
+        Some(u) => u,
+        None => {
+            let mut utxo = Utxo::default();
+            utxo.amount_sat = Amount::from_btc(3.6).unwrap().to_sat() as i64;
+            utxo.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
+                txid_bytes: Txid::all_zeros().to_string().as_bytes().to_owned(),
+                txid_str: Txid::all_zeros().to_string(),
+                output_index: 1,
+            });
+            utxo.address_type = 1;
+            vec![utxo]
+        }
+    };
     let inputs = predict_weight_for_inputs(utxos, amount)?;
 
     let weight = transaction::predict_weight(inputs, txn.script_pubkey_lens());
@@ -147,9 +161,7 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(utxos, 19_000);
-
-        println!("{:?}", &fees.as_ref().unwrap());
+        let fees = calculate_fee(Some(utxos), 19_000);
 
         assert_eq!(fees.is_ok(), true)
     }
@@ -170,9 +182,14 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(utxos, 19_000);
+        let fees = calculate_fee(Some(utxos), 19_000);
 
-        println!("wkh {:?}", &fees.as_ref().unwrap());
+        assert_eq!(fees.is_ok(), true)
+    }
+
+    #[test]
+    fn no_utxos() {
+        let fees = calculate_fee(None, 19_000);
 
         assert_eq!(fees.is_ok(), true)
     }
@@ -186,7 +203,7 @@ mod tests {
             txid_str: Txid::all_zeros().to_string(),
             output_index: 1,
         });
-        utxo_one.address_type = 4;
+        utxo_one.address_type = 1;
 
         let mut utxo_two = Utxo::default();
         utxo_two.amount_sat = Amount::from_btc(0.5).unwrap().to_sat() as i64;
@@ -194,9 +211,7 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(utxos, 125_000_000);
-
-        println!("wkh {:?}", &fees.as_ref().unwrap());
+        let fees = calculate_fee(Some(utxos), 125_000_000);
 
         assert_eq!(fees.is_ok(), true)
     }
@@ -217,7 +232,7 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(utxos, 19_000);
+        let fees = calculate_fee(Some(utxos), 19_000);
 
         assert_eq!(fees.is_err(), true)
     }
