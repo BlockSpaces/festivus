@@ -38,7 +38,7 @@ pub struct ProjectedFees {
     pub minimum_fee: (u64, u64),
 }
 
-pub fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<ProjectedFees, FestivusError> {
+pub async fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<ProjectedFees, FestivusError> {
     // Create a random taproot keypair for the ouput.
     let secp = Secp256k1::new();
     let mut rand = rand::thread_rng();
@@ -70,7 +70,7 @@ pub fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<ProjectedF
         Some(u) => u,
         None => {
             let mut utxo = Utxo::default();
-            utxo.amount_sat = Amount::from_btc(3.6).unwrap().to_sat() as i64;
+            utxo.amount_sat = amount as i64;
             utxo.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
                 txid_bytes: Txid::all_zeros().to_string().as_bytes().to_owned(),
                 txid_str: Txid::all_zeros().to_string(),
@@ -87,10 +87,18 @@ pub fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<ProjectedF
     let virtual_bytes = weight.to_vbytes_ceil();
 
     // Get fees
-    let fees = reqwest::blocking::get("https://mempool.space/api/v1/fees/recommended")
+    let fees = reqwest::get("https://mempool.space/api/v1/fees/recommended")
+        .await
         .map_err(|_| FestivusError::ReqwestError)?
         .json::<RecommendedFess>()
+        .await
         .map_err(|_| FestivusError::ReqwestError)?;
+
+    // #[cfg(feature = "blocking")]
+    // let fees = reqwest::blocking::get("https://mempool.space/api/v1/fees/recommended")
+    //     .map_err(|_| FestivusError::ReqwestError)?
+    //     .json::<RecommendedFess>()
+    //     .map_err(|_| FestivusError::ReqwestError)?;
 
     // Calc total amount
     Ok(ProjectedFees {
@@ -145,8 +153,8 @@ mod tests {
     use super::*;
     use bitcoin::Txid;
 
-    #[test]
-    fn calc_fee_tr() {
+    #[tokio::test]
+    async fn calc_fee_tr() {
         let mut utxo_one = Utxo::default();
         utxo_one.amount_sat = Amount::from_btc(3.6).unwrap().to_sat() as i64;
         utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
@@ -161,13 +169,13 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(Some(utxos), 19_000);
+        let fees = calculate_fee(Some(utxos), 19_000).await;
 
         assert_eq!(fees.is_ok(), true)
     }
 
-    #[test]
-    fn calc_fee_wkh() {
+    #[tokio::test]
+    async fn calc_fee_wkh() {
         let mut utxo_one = Utxo::default();
         utxo_one.amount_sat = Amount::from_btc(3.6).unwrap().to_sat() as i64;
         utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
@@ -182,20 +190,20 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(Some(utxos), 19_000);
+        let fees = calculate_fee(Some(utxos), 19_000).await;
 
         assert_eq!(fees.is_ok(), true)
     }
 
-    #[test]
-    fn no_utxos() {
-        let fees = calculate_fee(None, 19_000);
+    #[tokio::test]
+    async fn no_utxos() {
+        let fees = calculate_fee(None, 19_000).await;
 
         assert_eq!(fees.is_ok(), true)
     }
 
-    #[test]
-    fn calc_fee_two_inputs() {
+    #[tokio::test]
+    async fn calc_fee_two_inputs() {
         let mut utxo_one = Utxo::default();
         utxo_one.amount_sat = Amount::from_btc(1.0).unwrap().to_sat() as i64;
         utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
@@ -211,13 +219,13 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(Some(utxos), 125_000_000);
+        let fees = calculate_fee(Some(utxos), 125_000_000).await;
 
         assert_eq!(fees.is_ok(), true)
     }
 
-    #[test]
-    fn not_enough_btc() {
+    #[tokio::test]
+    async fn not_enough_btc() {
         let mut utxo_one = Utxo::default();
         utxo_one.amount_sat = Amount::from_sat(10_000).to_sat() as i64;
         utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
@@ -232,7 +240,7 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(Some(utxos), 19_000);
+        let fees = calculate_fee(Some(utxos), 19_000).await;
 
         assert_eq!(fees.is_err(), true)
     }
