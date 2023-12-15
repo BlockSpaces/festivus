@@ -94,12 +94,6 @@ pub async fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<Proj
         .await
         .map_err(|_| FestivusError::ReqwestError)?;
 
-    // #[cfg(feature = "blocking")]
-    // let fees = reqwest::blocking::get("https://mempool.space/api/v1/fees/recommended")
-    //     .map_err(|_| FestivusError::ReqwestError)?
-    //     .json::<RecommendedFess>()
-    //     .map_err(|_| FestivusError::ReqwestError)?;
-
     // Calc total amount
     Ok(ProjectedFees {
         fastest_fee: (virtual_bytes * fees.fastest_fee, fees.fastest_fee),
@@ -154,7 +148,7 @@ mod tests {
     use bitcoin::Txid;
 
     #[tokio::test]
-    async fn calc_fee_tr() {
+    async fn calc_fee_p2tr_inputs() {
         let mut utxo_one = Utxo::default();
         utxo_one.amount_sat = Amount::from_btc(3.6).unwrap().to_sat() as i64;
         utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
@@ -175,7 +169,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn calc_fee_wkh() {
+    async fn calc_fee_p2wkh_inputs() {
         let mut utxo_one = Utxo::default();
         utxo_one.amount_sat = Amount::from_btc(3.6).unwrap().to_sat() as i64;
         utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
