@@ -38,7 +38,7 @@ pub struct ProjectedFees {
     pub minimum_fee: (u64, u64),
 }
 
-pub async fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<ProjectedFees, FestivusError> {
+pub async fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64, user_fee_rate: Option<u64>) -> Result<ProjectedFees, FestivusError> {
     // Create a random taproot keypair for the ouput.
     let secp = Secp256k1::new();
     let mut rand = rand::thread_rng();
@@ -87,13 +87,24 @@ pub async fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<Proj
     let virtual_bytes = weight.to_vbytes_ceil();
 
     // Get fees
-    let fees = reqwest::get("https://mempool.space/api/v1/fees/recommended")
+    let fees = if let Some(fee_rate) = user_fee_rate {
+        // User provides a fee rate
+        RecommendedFess {
+            fastest_fee: fee_rate,
+            half_hour_fee: fee_rate,
+            hour_fee: fee_rate,
+            economy_fee: fee_rate,
+            minimum_fee: fee_rate,
+        }
+    } else {
+        // User does not provide a fee rate
+        reqwest::get("https://mempool.space/api/v1/fees/recommended")
         .await
         .map_err(|_| FestivusError::ReqwestError)?
         .json::<RecommendedFess>()
         .await
-        .map_err(|_| FestivusError::ReqwestError)?;
-
+        .map_err(|_| FestivusError::ReqwestError)?
+    };
     // Calc total amount
     Ok(ProjectedFees {
         fastest_fee: (virtual_bytes * fees.fastest_fee, fees.fastest_fee),
@@ -163,7 +174,7 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(Some(utxos), 19_000).await;
+        let fees = calculate_fee(Some(utxos), 19_000, None).await;
 
         assert_eq!(fees.is_ok(), true)
     }
@@ -184,14 +195,14 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(Some(utxos), 19_000).await;
+        let fees = calculate_fee(Some(utxos), 19_000, None).await;
 
         assert_eq!(fees.is_ok(), true)
     }
 
     #[tokio::test]
     async fn no_utxos() {
-        let fees = calculate_fee(None, 19_000).await;
+        let fees = calculate_fee(None, 19_000, None).await;
 
         assert_eq!(fees.is_ok(), true)
     }
@@ -213,7 +224,7 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(Some(utxos), 125_000_000).await;
+        let fees = calculate_fee(Some(utxos), 125_000_000, None).await;
 
         assert_eq!(fees.is_ok(), true)
     }
@@ -234,8 +245,31 @@ mod tests {
 
         let utxos = vec![utxo_one, utxo_two];
 
-        let fees = calculate_fee(Some(utxos), 19_000).await;
+        let fees = calculate_fee(Some(utxos), 19_000, None).await;
 
         assert_eq!(fees.is_err(), true)
+    }
+
+    #[tokio::test]
+    async fn calculate_fee_with_user_provided_rate() {
+        let mut utxo_one = Utxo::default();
+        utxo_one.amount_sat = Amount::from_btc(1.0).unwrap().to_sat() as i64;
+
+        let mut utxo_two = Utxo::default();
+        utxo_two.amount_sat = Amount::from_btc(0.5).unwrap().to_sat() as i64;
+
+        let utxos = vec![utxo_one, utxo_two];
+
+        let user_fee_rate = 50;
+
+        let fees = calculate_fee(Some(utxos), 125_000_000, Some(user_fee_rate)).await.unwrap();
+
+        // Testing the second item in each fee pair of the ProjectedFees struct 
+        // which is just the fee rate not the math of each fee * virtual_bytes
+        assert_eq!(fees.fastest_fee.1, user_fee_rate);
+        assert_eq!(fees.half_hour_fee.1, user_fee_rate);
+        assert_eq!(fees.hour_fee.1, user_fee_rate);
+        assert_eq!(fees.economy_fee.1, user_fee_rate);
+        assert_eq!(fees.minimum_fee.1, user_fee_rate);
     }
 }
