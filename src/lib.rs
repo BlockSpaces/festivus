@@ -8,7 +8,6 @@ use bitcoin::{
 };
 use serde::{Deserialize, Serialize};
 use std::vec;
-use tonic_lnd::lnrpc::{Utxo, AddressType};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -38,7 +37,40 @@ pub struct ProjectedFees {
     pub minimum_fee: (u64, u64),
 }
 
-pub async fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<ProjectedFees, FestivusError> {
+#[derive(Debug, Default, Clone)]
+pub enum FestivusAddressType {
+    #[default]
+    Taproot,
+    Other
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FestivusUtxo {
+    pub address_type: FestivusAddressType,
+    pub address: String,
+    pub amount_sat: i64,
+    pub pk_script: String,
+    pub outpoint: Option<FestivusOutpoint>
+}
+
+#[derive(Debug, Clone)]
+pub struct FestivusOutpoint {
+    pub txid_bytes: Vec<u8>,
+    pub txid: String,
+    pub output_index: i32
+}
+
+impl Default for FestivusOutpoint {
+    fn default() -> Self {
+        Self {
+            txid_bytes: Txid::all_zeros().to_byte_array().to_vec(),
+            txid: Txid::all_zeros().to_string(),
+            output_index: 1
+        }
+    }
+}
+
+pub async fn calculate_fee(utxos: Option<Vec<FestivusUtxo>>, amount: i64) -> Result<ProjectedFees, FestivusError> {
     // Create a random taproot keypair for the ouput.
     let secp = Secp256k1::new();
     let mut rand = rand::thread_rng();
@@ -69,14 +101,10 @@ pub async fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<Proj
     let utxos = match utxos {
         Some(u) => u,
         None => {
-            let mut utxo = Utxo::default();
-            utxo.amount_sat = amount as i64;
-            utxo.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
-                txid_bytes: Txid::all_zeros().to_string().as_bytes().to_owned(),
-                txid_str: Txid::all_zeros().to_string(),
-                output_index: 1,
-            });
-            utxo.address_type = 1;
+            let mut utxo = FestivusUtxo::default();
+            utxo.amount_sat = amount;
+            utxo.outpoint = Some(FestivusOutpoint::default());
+            utxo.address_type = FestivusAddressType::Taproot;
             vec![utxo]
         }
     };
@@ -104,15 +132,15 @@ pub async fn calculate_fee(utxos: Option<Vec<Utxo>>, amount: u64) -> Result<Proj
     })
 }
 
-fn predict_weight_for_inputs(mut utxos: Vec<Utxo>, amount: u64) -> Result<Vec<InputWeightPrediction>, FestivusError> {
+fn predict_weight_for_inputs(mut utxos: Vec<FestivusUtxo>, amount: i64) -> Result<Vec<InputWeightPrediction>, FestivusError> {
     // Sort the UTXO's for largest first selection.
     // This is the default coin selection algorithm for LND
     utxos.sort_by(|a, b| b.amount_sat.cmp(&a.amount_sat));
 
     // The coins selected for the transaction.
-    let mut coins = Vec::<Utxo>::new();
+    let mut coins = Vec::<FestivusUtxo>::new();
     // If the coins fulfill requirement for the transaction.
-    let mut amount_remaining: i64 = amount as i64;
+    let mut amount_remaining = amount;
 
     // Iterate over the provided utxos and select the coins used for the transaction.
     utxos.iter().for_each(|utxo| {
@@ -131,9 +159,9 @@ fn predict_weight_for_inputs(mut utxos: Vec<Utxo>, amount: u64) -> Result<Vec<In
     let txin = coins
         .iter()
         .map(|utxo| {
-            match utxo.clone().address_type() {
-                AddressType::TaprootPubkey => InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH,
-                _ => InputWeightPrediction::P2WPKH_MAX,
+            match utxo.address_type {
+                FestivusAddressType::Taproot => InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH,
+                FestivusAddressType::Other => InputWeightPrediction::P2WPKH_MAX,
             }
         })
         .collect::<Vec<InputWeightPrediction>>();
@@ -145,20 +173,15 @@ fn predict_weight_for_inputs(mut utxos: Vec<Utxo>, amount: u64) -> Result<Vec<In
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::Txid;
 
     #[tokio::test]
     async fn calc_fee_p2tr_inputs() {
-        let mut utxo_one = Utxo::default();
+        let mut utxo_one = FestivusUtxo::default();
         utxo_one.amount_sat = Amount::from_btc(3.6).unwrap().to_sat() as i64;
-        utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
-            txid_bytes: Txid::all_zeros().to_string().as_bytes().to_owned(),
-            txid_str: Txid::all_zeros().to_string(),
-            output_index: 1,
-        });
-        utxo_one.address_type = 4;
+        utxo_one.outpoint = Some(FestivusOutpoint::default());
+        utxo_one.address_type = FestivusAddressType::Taproot;
 
-        let mut utxo_two = Utxo::default();
+        let mut utxo_two = FestivusUtxo::default();
         utxo_two.amount_sat = Amount::from_btc(1.2).unwrap().to_sat() as i64;
 
         let utxos = vec![utxo_one, utxo_two];
@@ -170,17 +193,13 @@ mod tests {
 
     #[tokio::test]
     async fn calc_fee_p2wkh_inputs() {
-        let mut utxo_one = Utxo::default();
+        let mut utxo_one = FestivusUtxo::default();
         utxo_one.amount_sat = Amount::from_btc(3.6).unwrap().to_sat() as i64;
-        utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
-            txid_bytes: Txid::all_zeros().to_string().as_bytes().to_owned(),
-            txid_str: Txid::all_zeros().to_string(),
-            output_index: 1,
-        });
-        utxo_one.address_type = 1;
+        utxo_one.outpoint = Some(FestivusOutpoint::default());
+        utxo_one.address_type = FestivusAddressType::Other;
 
-        let mut utxo_two = Utxo::default();
-        utxo_two.amount_sat = Amount::from_btc(1.2).unwrap().to_sat() as i64;
+        let mut utxo_two = FestivusUtxo::default();
+        utxo_two.amount_sat = Amount::from_btc(1.2).unwrap().to_sat()as i64;
 
         let utxos = vec![utxo_one, utxo_two];
 
@@ -198,18 +217,14 @@ mod tests {
 
     #[tokio::test]
     async fn calc_fee_two_inputs() {
-        let mut utxo_one = Utxo::default();
+        let mut utxo_one = FestivusUtxo::default();
         utxo_one.amount_sat = Amount::from_btc(1.0).unwrap().to_sat() as i64;
-        utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
-            txid_bytes: Txid::all_zeros().to_string().as_bytes().to_owned(),
-            txid_str: Txid::all_zeros().to_string(),
-            output_index: 1,
-        });
-        utxo_one.address_type = 1;
+        utxo_one.outpoint = Some(FestivusOutpoint::default());
+        utxo_one.address_type = FestivusAddressType::Other;
 
-        let mut utxo_two = Utxo::default();
+        let mut utxo_two = FestivusUtxo::default();
         utxo_two.amount_sat = Amount::from_btc(0.5).unwrap().to_sat() as i64;
-        utxo_two.address_type = 1;
+        utxo_two.address_type = FestivusAddressType::Other;
 
         let utxos = vec![utxo_one, utxo_two];
 
@@ -220,16 +235,12 @@ mod tests {
 
     #[tokio::test]
     async fn not_enough_btc() {
-        let mut utxo_one = Utxo::default();
+        let mut utxo_one = FestivusUtxo::default();
         utxo_one.amount_sat = Amount::from_sat(10_000).to_sat() as i64;
-        utxo_one.outpoint = Some(tonic_lnd::lnrpc::OutPoint {
-            txid_bytes: Txid::all_zeros().to_string().as_bytes().to_owned(),
-            txid_str: Txid::all_zeros().to_string(),
-            output_index: 1,
-        });
-        utxo_one.address_type = 4;
+        utxo_one.outpoint = Some(FestivusOutpoint::default());
+        utxo_one.address_type = FestivusAddressType::Taproot;
 
-        let mut utxo_two = Utxo::default();
+        let mut utxo_two = FestivusUtxo::default();
         utxo_two.amount_sat = Amount::from_sat(5_000).to_sat() as i64;
 
         let utxos = vec![utxo_one, utxo_two];
