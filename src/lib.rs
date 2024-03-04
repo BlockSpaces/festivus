@@ -28,7 +28,7 @@ struct RecommendedFess {
     minimum_fee: u64,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Clone)]
 pub struct ProjectedFees {
     pub fastest_fee: (u64, u64),
     pub half_hour_fee: (u64, u64),
